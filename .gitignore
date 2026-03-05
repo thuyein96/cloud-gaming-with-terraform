@@ -1,7 +1,7 @@
 # Terraform state files (contain sensitive infrastructure data)
-*.tfstate
-*.tfstate.backup
-*.tfstate.*.backup
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfstate.*.backup
 
 # Terraform variables (may contain secrets like passwords, keys)
 terraform.tfvars
