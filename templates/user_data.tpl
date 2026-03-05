@@ -53,6 +53,25 @@ function install-autologin {
     (New-Object PInvoke.LSAUtil.LSAutil -ArgumentList "DefaultPassword").SetSecret($password)
 }
 
+function disable-lock-on-rdp-disconnect {
+    # Prevent screen from locking when RDP session disconnects (fixes Parsec showing lock screen)
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
+    New-Item -Path $regPath -Force | Out-Null
+    Set-ItemProperty -Path $regPath -Name "NoLockScreen" -Value 1 -Type DWord
+
+    # Disable lock screen on session disconnect
+    $regPath2 = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+    Set-ItemProperty -Path $regPath2 -Name "fDisableCam" -Value 1 -Type DWord
+
+    # Disable screensaver
+    Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveActive" -Value "0"
+    Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaverIsSecure" -Value "0"
+
+    # Disable require password on wake/resume
+    powercfg /setacvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0
+    powercfg /setactive SCHEME_CURRENT
+}
+
 function install-graphic-driver {
     # https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/install-nvidia-driver.html#nvidia-gaming-driver
 
@@ -60,7 +79,10 @@ function install-graphic-driver {
         $ExtractionPath = "C:\nvidia-driver\driver"
         $Bucket = ""
         $KeyPrefix = ""
-        $InstallerFilter = "*win10*"
+        $InstallerFilter = "*.exe"
+
+        # Ensure extraction directory exists
+        New-Item -ItemType Directory -Force -Path $ExtractionPath | Out-Null
 
         %{ if regex("^g[0-9]+", var.instance_type) == "g3" }
 
@@ -88,27 +110,31 @@ function install-graphic-driver {
         $Bucket = "nvidia-gaming"
         $KeyPrefix = "windows/latest"
 
-        # download and extract driver
+        # download and extract driver (zip is multi-part, requires 7-Zip)
+        choco install 7zip -y
         $Objects = Get-S3Object -BucketName $Bucket -KeyPrefix $KeyPrefix -Region us-east-1
         foreach ($Object in $Objects) {
             if ($Object.Size -ne 0) {
                 $LocalFileName = "C:\nvidia-driver\driver.zip"
                 Copy-S3Object -BucketName $Bucket -Key $Object.Key -LocalFile $LocalFileName -Region us-east-1
-                Expand-Archive $LocalFileName -DestinationPath $ExtractionPath
+                & "C:\Program Files\7-Zip\7z.exe" x $LocalFileName -o"$ExtractionPath" -y
                 break
             }
         }
 
-        # install licence
-        Copy-S3Object -BucketName $Bucket -Key "GridSwCert-Archive/GridSwCert-Windows_2020_04.cert" -LocalFile "C:\Users\Public\Documents\GridSwCert.txt" -Region us-east-1
+        # install licence - find the latest cert dynamically
+        $CertObjects = Get-S3Object -BucketName $Bucket -KeyPrefix "GridSwCert-Archive" -Region us-east-1
+        $LatestCert = ($CertObjects | Where-Object { $_.Key -like "*.cert" } | Sort-Object LastModified -Descending | Select-Object -First 1).Key
+        Copy-S3Object -BucketName $Bucket -Key $LatestCert -LocalFile "C:\Users\Public\Documents\GridSwCert.txt" -Region us-east-1
         [microsoft.win32.registry]::SetValue("HKEY_LOCAL_MACHINE\SOFTWARE\NVIDIA Corporation\Global", "vGamingMarketplace", 0x02)
 
         %{ endif }
         %{ endif }
 
-        if (Test-Path -Path $ExtractionPath) {
+        $InstallerFile = Get-ChildItem -Path $ExtractionPath -Filter $InstallerFilter -Recurse | Where-Object { $_.Name -notlike "*uninstall*" } | Select-Object -First 1 -ExpandProperty FullName
+
+        if ($InstallerFile) {
             # install driver
-            $InstallerFile = Get-ChildItem -path $ExtractionPath -Include $InstallerFilter -Recurse | ForEach-Object { $_.FullName }
             Start-Process -FilePath $InstallerFile -ArgumentList "/s /n" -Wait
 
             # install task to disable second monitor on login
@@ -139,6 +165,8 @@ install-admin-password
 %{ if var.install_auto_login }
 install-autologin
 %{ endif }
+
+disable-lock-on-rdp-disconnect
 
 %{ if var.install_graphic_card_driver }
 install-graphic-driver
