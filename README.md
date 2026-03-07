@@ -2,6 +2,14 @@
 
 Spin up a Windows cloud gaming PC on an AWS EC2 GPU Spot Instance using Terraform. On first boot the instance automatically installs NVIDIA drivers, Parsec, Steam, and/or Epic Games Launcher.
 
+## Demo Video
+
+Watch a walkthrough of the setup and first boot experience here:
+
+[Watch the demo video](https://youtu.be/xGS1HfCbT1w)
+
+> Replace `https://youtu.be/xGS1HfCbT1w` with your YouTube, Loom, or hosted MP4 link.
+
 ## Prerequisites
 
 | Requirement | Notes |
@@ -54,7 +62,7 @@ install_steam               = true
 install_epic_games_launcher = false
 ```
 
-> Find your public IP: `curl ifconfig.me`
+> Find your public IP: `https://api.ipify.org/`
 
 ### 4. Deploy
 
